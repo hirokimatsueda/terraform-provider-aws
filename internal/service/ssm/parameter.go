@@ -248,13 +248,23 @@ func resourceParameterRead(ctx context.Context, d *schema.ResourceData, meta any
 	var diags diag.Diagnostics
 	conn := meta.(*conns.AWSClient).SSMClient(ctx)
 
+	rawConfig := d.GetRawConfig()
+	need_decryption := false
+
+	// If the value is set, we need to decrypt it if the type is SecureString.
+	if !rawConfig.IsNull() {
+		if v := rawConfig.GetAttr("value"); v.IsKnown() && !v.IsNull() {
+			need_decryption = true
+		}
+	}
+
 	const (
 		// Maximum amount of time to wait for asynchronous validation on SSM Parameter creation.
 		timeout = 2 * time.Minute
 	)
 	outputRaw, err := tfresource.RetryWhen(ctx, timeout,
 		func() (any, error) {
-			return findParameterByName(ctx, conn, d.Id(), true)
+			return findParameterByName(ctx, conn, d.Id(), need_decryption)
 		},
 		func(err error) (bool, error) {
 			if d.IsNewResource() && tfresource.NotFound(err) && d.Get("data_type").(string) == "aws:ec2:image" {
@@ -282,7 +292,6 @@ func resourceParameterRead(ctx context.Context, d *schema.ResourceData, meta any
 	d.Set(names.AttrVersion, param.Version)
 
 	hasWriteOnly := d.Get("has_value_wo").(bool)
-	rawConfig := d.GetRawConfig()
 	if !rawConfig.IsNull() {
 		valueWO, di := flex.GetWriteOnlyStringValue(d, cty.GetAttrPath("value_wo"))
 		diags = append(diags, di...)
